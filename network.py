@@ -5,6 +5,7 @@ import threading
 import traceback
 from typing import Callable, Dict, List
 from block import Block, create_block_from_dict, hash_block
+from consensus import fork_block, resolve_forks
 
 
 def list_peers(fpath: str):
@@ -57,147 +58,79 @@ def handle_client(
     conn: socket.socket,
     addr: str,
     blockchain: List[Block],
+    forks: List[List[Dict]],
     difficulty: int,
+    fork_lim: int,
     transactions: List[Dict],
     blockchain_fpath: str,
     on_valid_block_callback: Callable,
 ):
-    """Lida com mensagens recebidas de outros nós.
-    
-    Args:
-        conn: Conexão do socket
-        addr: Endereço do nó remetente
-        blockchain: Cadeia de blocos local
-        difficulty: Dificuldade de mineração atual
-        transactions: Lista de transações pendentes
-        blockchain_fpath: Caminho para o arquivo da blockchain
-        on_valid_block_callback: Função de callback para quando um bloco válido é recebido
-    """
     try:
         data = conn.recv(4096).decode()
-        if not data:
-            conn.close()
-            return
-            
         msg = json.loads(data)
-        
         if msg["type"] == "block":
-            handle_received_block(
-                msg["data"], 
-                blockchain, 
-                difficulty, 
-                blockchain_fpath, 
-                on_valid_block_callback, 
-                addr
-            )
-            
-        elif msg["type"] == "chain_request":
-            # Envia a cadeia completa para o nó que solicitou
-            send_chain(conn, blockchain)
-            
-        elif msg["type"] == "chain":
-            # Recebeu uma cadeia completa de outro nó
-            handle_received_chain(
-                msg["data"], 
-                blockchain, 
-                blockchain_fpath, 
-                addr
-            )
-            
+            block = create_block_from_dict(msg["data"])
+            expected_hash = hash_block(block)
+
+            # valida a integridade do bloco
+            if not block.hash.startswith('0' * difficulty) or block.hash != expected_hash:
+                print(f"[!] Invalid block received from {addr}")
+                return
+
+            # verifica se o bloco não está em duplicidade
+            if block.hash == blockchain[-1].hash:
+                print(f"[!] Duplicaded block received from {addr}")
+                return
+
+            # verifica se precisa tratar do fork
+            if block.index <= blockchain[-1].index or len(forks) > 0:
+                fork_block(block, blockchain, forks)
+                resolve_forks(fork_lim, blockchain, forks)
+                on_valid_block_callback(blockchain_fpath, blockchain)
+                return
+
+            # adiciona na block chain
+            blockchain.append(block)
+            on_valid_block_callback(blockchain_fpath, blockchain)
+            print(f"[✓] New valid block added from {addr}")
+
+            '''
+            if (block.prev_hash == blockchain[-1].hash and block.hash.startswith("0" * difficulty) and block.hash == expected_hash):
+
+                # remove as transações que existem no pool com as transações que
+                # foram processadas pelo bloco propagado por outro nó. assim
+                # evita que transações apareçam em duplicidade na rede
+                """
+                new_txs = [tx for tx in transactions if tx not in block.transactions]
+                transactions.clear()
+                transactions.extend(new_txs)
+                """
+
+                blockchain.append(block)
+                on_valid_block_callback(blockchain_fpath, blockchain)
+                print(f"[✓] New valid block added from {addr}")
+            else:
+                print(f"[!] Invalid block received from {addr}")
+            '''
         elif msg["type"] == "tx":
-            # Recebeu uma nova transação
             tx = msg["data"]
             if tx not in transactions:
                 transactions.append(tx)
-                print(f"[+] Transação recebida de {addr}")
-                
-    except json.JSONDecodeError:
-        print(f"[!] Mensagem inválida recebida de {addr}")
+                print(f"[+] Transaction received from {addr}")
     except Exception as e:
-        print(f"[!] Exceção ao lidar com cliente {addr}: {e}")
-        print(traceback.format_exc())
-    finally:
-        conn.close()
-
-
-def handle_received_block(block_data, blockchain, difficulty, blockchain_fpath, on_valid_block_callback, sender_addr):
-    """Lida com um bloco recebido de outro nó."""
-    try:
-        block = create_block_from_dict(block_data)
-        expected_hash = hash_block(block)
-        
-        # Verifica se o bloco é válido
-        if block.hash != expected_hash or not block.hash.startswith("0" * difficulty):
-            print(f"[!] Bloco inválido recebido de {sender_addr}")
-            return
-            
-        # Se o bloco é o próximo da cadeia, adiciona normalmente
-        if block.prev_hash == blockchain[-1].hash:
-            blockchain.append(block)
-            on_valid_block_callback(blockchain_fpath, blockchain)
-            print(f"[✓] Novo bloco {block.index} adicionado de {sender_addr}")
-            return
-            
-        # Se não for o próximo, verifica se é parte de uma cadeia mais longa
-        if block.index > len(blockchain) - 1:
-            print(f"[i] Possível fork detectado. Solicitando cadeia completa de {sender_addr}")
-            request_chain(sender_addr, blockchain[0].port, blockchain[-1].hash)
-            
-    except Exception as e:
-        print(f"[!] Erro ao processar bloco de {sender_addr}: {e}")
-
-
-def handle_received_chain(chain_data, blockchain, blockchain_fpath, sender_addr):
-    """Lida com uma cadeia de blocos recebida de outro nó."""
-    try:
-        # Converte os dicionários de volta para objetos Block
-        new_chain = [create_block_from_dict(block) for block in chain_data]
-        
-        # Verifica se a nova cadeia é mais longa e válida
-        if len(new_chain) > len(blockchain):
-            print(f"[i] Recebida cadeia de tamanho {len(new_chain)} de {sender_addr}")
-            from chain import replace_chain
-            if replace_chain(new_chain, blockchain, blockchain_fpath):
-                print(f"[✓] Cadeia substituída por uma mais longa de {sender_addr}")
-            else:
-                print(f"[!] Falha ao substituir cadeia por uma de {sender_addr}")
-    except Exception as e:
-        print(f"[!] Erro ao processar cadeia de {sender_addr}: {e}")
-
-
-def send_chain(conn, blockchain):
-    """Envia a cadeia de blocos para um nó solicitante."""
-    try:
-        chain_data = [block.as_dict() for block in blockchain]
-        response = {
-            "type": "chain",
-            "data": chain_data
-        }
-        conn.send(json.dumps(response).encode())
-    except Exception as e:
-        print(f"[!] Erro ao enviar cadeia: {e}")
-
-
-def request_chain(peer_addr, peer_port, last_hash):
-    """Solicita a cadeia de blocos de um nó específico."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((peer_addr, peer_port))
-        request = {
-            "type": "chain_request",
-            "last_hash": last_hash
-        }
-        s.send(json.dumps(request).encode())
-        s.close()
-    except Exception as e:
-        print(f"[!] Erro ao solicitar cadeia de {peer_addr}:{peer_port}: {e}")
+        print(
+            f"Exception when hadling client. Exception: {e}. {traceback.format_exc()}"
+        )
+    conn.close()
 
 
 def start_server(
     host: str,
     port: int,
     blockchain: List[Block],
+    forks: List[List[Dict]],
     difficulty: int,
+    fork_lim: int,
     transactions: List[Dict],
     blockchain_fpath: str,
     on_valid_block_callback: Callable,
@@ -215,7 +148,9 @@ def start_server(
                     conn,
                     addr,
                     blockchain,
+                    forks,
                     difficulty,
+                    fork_lim,
                     transactions,
                     blockchain_fpath,
                     on_valid_block_callback,

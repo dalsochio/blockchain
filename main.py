@@ -1,4 +1,5 @@
 from typing import Dict, List
+from block import Block
 
 from chain import (
     get_balance,
@@ -28,12 +29,15 @@ if __name__ == "__main__":
     config = load_config()
     blockchain = load_chain(config["blockchain_file"])
     transactions: List[Dict] = []
+    forks: List[List[Block]] = []
 
     start_server(
         config["host"],
         config["port"],
         blockchain,
+        forks,
         config["difficulty"],
+        config["fork_lim"],
         transactions,
         config["blockchain_file"],
         on_valid_block_callback,
@@ -46,6 +50,7 @@ if __name__ == "__main__":
         print("3. View blockchain")
         print("4. Get balance")
         print("5. Exit")
+        print("6. View forks")
         choice = input("> ").strip()
 
         if choice == "1":
@@ -65,9 +70,11 @@ if __name__ == "__main__":
             mine_block(
                 transactions,
                 blockchain,
+                forks,
                 config["node_id"],
                 config["reward"],
                 config["difficulty"],
+                config["fork_lim"],
                 config["blockchain_file"],
                 config["peers_file"],
                 config["port"],
@@ -84,6 +91,11 @@ if __name__ == "__main__":
         elif choice == "5":
             print("Exiting...")
             break
+
+        elif choice == "6":
+            for fork in forks:
+                print()
+                print_chain(fork)
 
         else:
             print("[!] Invalid choice.")
