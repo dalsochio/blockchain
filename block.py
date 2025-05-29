@@ -14,6 +14,7 @@ class Block:
         prev_hash: str,
         nonce: int,
         hash: str,
+        difficulty: int
     ):
         self.index: int = index
         self.timestamp: str = timestamp
@@ -21,6 +22,7 @@ class Block:
         self.prev_hash: str = prev_hash
         self.nonce: int = nonce
         self.hash: str = hash
+        self.difficulty: int = difficulty
 
     def as_dict(self) -> Dict:
         """TODO: garantir que dict possui tipo serializável!"""
@@ -35,6 +37,7 @@ def create_genesis_block() -> Block:
         prev_hash="0",
         nonce=0,
         hash="0",
+        difficulty=0
     )
     return gen_block
 
@@ -47,6 +50,7 @@ def create_block_from_dict(block_data: Dict) -> Block:
         prev_hash=block_data["prev_hash"],
         nonce=block_data["nonce"],
         hash=block_data["hash"],
+        difficulty=block_data["difficulty"]
     )
 
 
@@ -64,7 +68,7 @@ def create_block(
         coinbase = {"from": "network", "to": miner, "amount": reward}
         all_tx = [coinbase] + transactions
 
-        block = Block(index, str(datetime.utcnow()), all_tx, prev_hash, nonce, "")
+        block = Block(index, str(datetime.utcnow()), all_tx, prev_hash, nonce, "", difficulty)
         block.hash = hash_block(block)
         if block.hash.startswith("0" * difficulty):
             print(f"[✓] Block mined: {block.hash}")
