@@ -4,7 +4,7 @@ from typing import List
 
 from block import Block, create_block, create_block_from_dict, create_genesis_block
 from network import broadcast_block, broadcast_transaction
-from consensus import fork_block, resolve_forks
+from consensus import get_block_info, create_forks, apply_consensus
 
 
 def load_chain(fpath: str) -> List[Block]:
@@ -54,29 +54,26 @@ def mine_block(
     peers_fpath: str,
     port: int,
 ):
+    # ------------------------------------------------ #
+    # ------------------- SOLUÇÃO -------------------- #
+    # ------------------------------------------------ #
+    bhash, bindex = get_block_info(blockchain, forks)
+
     new_block = create_block(
         transactions,
-        blockchain[-1].hash,
+        bhash,
         miner=node_id,
-        index=len(blockchain),
+        index=bindex,
         reward=reward,
         difficulty=difficulty,
     )
 
-    '''
-    # verifica se o bloco não está em duplicidade ou se o bloco
-    # recém minerado não é sequência da sua blockchain (pode 
-    # acontecer em casos onde o fork tenha sido resolvido antes
-    # da conclusão da mineração)
-    if new_block.hash == blockchain[-1].hash or new_block.prev_hash != blockchain[-1].hash:
-        print(f"[!] Invalid block mined")
-        return
-    '''
-
-    # verifica se precisa tratar do fork
+    # ------------------------------------------------ #
+    # ------------------- SOLUÇÃO -------------------- #
+    # ------------------------------------------------ #
     if new_block.index <= blockchain[-1].index or len(forks) > 0:
-        fork_block(new_block, blockchain, forks)
-        resolve_forks(fork_lim, blockchain, forks)
+        create_forks(new_block, True, blockchain, forks)
+        apply_consensus(fork_lim, blockchain, forks)
     else:
         blockchain.append(new_block)
 

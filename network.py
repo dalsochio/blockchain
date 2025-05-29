@@ -5,7 +5,7 @@ import threading
 import traceback
 from typing import Callable, Dict, List
 from block import Block, create_block_from_dict, hash_block
-from consensus import fork_block, resolve_forks
+from consensus import create_forks, apply_consensus
 
 
 def list_peers(fpath: str):
@@ -82,10 +82,12 @@ def handle_client(
                 print(f"[!] Duplicaded block received from {addr}")
                 return
 
-            # verifica se precisa tratar do fork
+            # ------------------------------------------------ #
+            # ------------------- SOLUÇÃO -------------------- #
+            # ------------------------------------------------ #
             if block.index <= blockchain[-1].index or len(forks) > 0:
-                fork_block(block, blockchain, forks)
-                resolve_forks(fork_lim, blockchain, forks)
+                create_forks(block, False, blockchain, forks)
+                apply_consensus(fork_lim, blockchain, forks)
                 on_valid_block_callback(blockchain_fpath, blockchain)
                 return
 
